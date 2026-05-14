@@ -15,7 +15,7 @@ use crate::{
 #[derive(Default)]
 pub struct Padding {
     pub top: u16,
-    clock: String,
+    pub clock: String, // Modificado para pub para acessarmos no padding customizado
     text: String,
 }
 
@@ -91,6 +91,23 @@ impl Clock {
         let mut text = self.mode.text(self.width())?;
         let (mut hour, minute, second) = self.mode.get_time();
 
+        // --- INÍCIO DA NOSSA INJEÇÃO VISUAL ---
+        let mut top_label = String::new();
+        let mut ansi_color = "";
+        
+        if let ClockMode::Counter(counter) = &self.mode {
+            if let crate::clock::counter::CounterType::Pomodoro { phase, cycles, .. } = &counter.ty {
+                let (phase_name, color_code) = match phase.get() {
+                    crate::clock::counter::TimerPhase::Work => ("MODO FOCO", "\x1b[38;2;74;112;117m"),
+                    crate::clock::counter::TimerPhase::Rest => ("MODO DESCANSO", "\x1b[38;2;140;90;74m"),
+                    crate::clock::counter::TimerPhase::Prep => ("PREPARAÇÃO", "\x1b[38;2;148;163;184m"),
+                };
+                top_label = format!("{} - Ciclos: {}", phase_name, cycles.get());
+                ansi_color = color_code;
+            }
+        }
+        // --- FIM DA INJEÇÃO ---
+
         if matches!(self.mode, ClockMode::Time { .. }) && self.use_12h {
             let suffix = if hour < 12 {
                 Self::AM_SUFFIX
@@ -108,6 +125,18 @@ impl Clock {
         }
 
         let color = &self.color;
+
+        // SE TEM POMODORO, APLICA A COR ANSI NO TERMINAL
+        if !ansi_color.is_empty() {
+            write!(w, "{}", ansi_color)?;
+        }
+
+        // IMPRIME O RÓTULO DO STATUS CENTRALIZADO ACIMA DO RELÓGIO
+        if !top_label.is_empty() {
+            let pad_len = self.padding.clock.len() + (self.width() as usize).saturating_sub(top_label.len()) / 2;
+            let pad = " ".repeat(pad_len);
+            writeln!(w, "{}{}\n\r", pad, top_label)?;
+        }
 
         for row in 0..5 {
             let colon_character = if self.blink && (second & 1 == 1) {
@@ -135,12 +164,15 @@ impl Clock {
         }
 
         let bold_escape_str = if self.bold { Color::BOLD } else { "" };
+        let reset_code = if !ansi_color.is_empty() { "\x1b[0m" } else { "" };
 
         writeln!(
             w,
-            "\n{bold_escape_str}{}{}{text}",
+            "\n{bold_escape_str}{}{}{}{}",
             self.padding.text,
-            self.color.foreground()
+            self.color.foreground(), // O original
+            text, // O "P: Toggle Pause..."
+            reset_code // Limpa a cor do Pomodoro
         )?;
 
         Ok(())
