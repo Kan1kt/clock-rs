@@ -21,7 +21,7 @@ use signal_hook::{consts, flag};
 use crate::{
     cli::args::{Args, Mode, TimerArgs},
     clock::{
-        counter::{Counter, CounterType},
+        counter::{Counter, CounterType, TimerPhase},
         mode::ClockMode,
         time_zone::TimeZone,
         Clock,
@@ -118,6 +118,7 @@ impl State {
 
             match event::read()? {
                 Event::Key(key_event) => match key_event {
+                    // Sair do programa
                     KeyEvent {
                         code: KeyCode::Esc | KeyCode::Char('Q' | 'q'),
                         modifiers: KeyModifiers::NONE,
@@ -128,11 +129,15 @@ impl State {
                         modifiers: KeyModifiers::CONTROL,
                         ..
                     } => return Ok(()),
+
+                    // Recarregar configuração
                     KeyEvent {
                         code: KeyCode::Char('r'),
                         modifiers: KeyModifiers::CONTROL,
                         ..
                     } => reload_config.store(true, Ordering::Relaxed),
+
+                    // Controles de Pausa e Reinício (P e R)
                     KeyEvent {
                         code: KeyCode::Char(character @ ('P' | 'p' | 'R' | 'r')),
                         kind: KeyEventKind::Press,
@@ -148,6 +153,50 @@ impl State {
                             _ => counter.restart(),
                         }
 
+                        let (width, height) = terminal::size()?;
+                        self.refresh_display(width, height)?;
+                    }
+
+                    // --- NOVOS ATALHOS: T, S, C, X ---
+                    KeyEvent {
+                        code: KeyCode::Char(character @ ('t' | 's' | 'c' | 'x')),
+                        kind: KeyEventKind::Press,
+                        modifiers: KeyModifiers::NONE,
+                        ..
+                    } => {
+                        match character {
+                            'c' => {
+                                // Atalho C: Modo Relógio (Hora Atual)
+                                self.clock.mode = ClockMode::Time {
+                                    time_zone: TimeZone::from_utc(false),
+                                    date_format: String::from("%H:%M:%S"),
+                                };
+                            }
+                            's' => {
+                                // Atalho S: Modo Cronómetro
+                                self.clock.mode = ClockMode::Counter(Counter::new(CounterType::Stopwatch));
+                            }
+                            't' => {
+                                // Atalho T: Modo Pomodoro (50/10/30s)
+                                self.clock.mode = ClockMode::Counter(Counter::new(CounterType::Pomodoro {
+                                    work: Duration::from_secs(50 * 60),
+                                    rest: Duration::from_secs(10 * 60),
+                                    prep: Duration::from_secs(30),
+                                    phase: std::cell::Cell::new(TimerPhase::Work),
+                                    cycles: std::cell::Cell::new(0),
+                                    current_target: std::cell::Cell::new(Duration::from_secs(50 * 60)),
+                                }));
+                            }
+                            'x' => {
+                                // Atalho X: Zerar contador de ciclos no Pomodoro
+                                if let ClockMode::Counter(counter) = &self.clock.mode {
+                                    if let CounterType::Pomodoro { cycles, .. } = &counter.ty {
+                                        cycles.set(0);
+                                    }
+                                }
+                            }
+                            _ => (),
+                        }
                         let (width, height) = terminal::size()?;
                         self.refresh_display(width, height)?;
                     }
